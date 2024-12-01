@@ -10,9 +10,6 @@
 
 #include <Wire.h>            // I2C comm to camera
 #include "Adafruit_OV7670.h" // Camera library
-#include <Adafruit_GFX.h>    // Core graphics library
-#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
-#include <SPI.h>
 
 // CAMERA CONFIG -----------------------------------------------------------
 
@@ -42,14 +39,6 @@ OV7670_pins pins = {
 Adafruit_OV7670 cam(OV7670_ADDR, &pins, &CAM_I2C, &arch);
 // Adafruit_OV7670 cam(0x30, &pins, &CAM_I2C, &arch); // OIV2640 WIP
 
-// DISPLAY CONFIG ----------------------------------------------------------
-
-#define TFT_CS  17 // Near SPI0 at south end of board
-#define TFT_DC  16
-#define TFT_RST -1 // Connect to MCU reset
-
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
-
 // SETUP - RUNS ONCE ON STARTUP --------------------------------------------
 
 void setup(void) {
@@ -58,20 +47,13 @@ void setup(void) {
   delay(1000);
   Serial.println(F("Hello! Camera Test"));
 
-  pinMode(25, OUTPUT);
-  digitalWrite(25, LOW);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   // These are currently RP2040 Philhower-specific
-  SPI.setSCK(18); // SPI0
-  SPI.setTX(19);
   Wire.setSDA(pins.sda); // I2C0
   Wire.setSCL(pins.scl);
 
-  tft.init(240, 240);
-  tft.setSPISpeed(48000000);
-  tft.fillScreen(ST77XX_BLACK);
-  tft.println("Howdy");
-tft.setRotation(3);
   // Once started, the camera continually fills a frame buffer
   // automagically; no need to request a frame.
   OV7670_status status = cam.begin(CAM_MODE, CAM_SIZE, 30.0);
@@ -98,18 +80,9 @@ tft.setRotation(3);
 
 // MAIN LOOP - RUNS REPEATEDLY UNTIL RESET OR POWER OFF --------------------
 
-// TFT setAddrWindow() involves a lot of context switching that can slow
-// things down a bit, so we don't do it on every frame. Instead, it's only
-// set periodically, and we just keep writing data to the same area of the
-// screen (it wraps around automatically). We do need an OCCASIONAL
-// setAddrWindow() in case SPI glitches, as this syncs things up to a
-// known region of the screen again.
-#define KEYFRAME 30        // Number of frames between setAddrWindow commands
-uint16_t frame = KEYFRAME; // Force 1st frame as keyframe
-
 void loop() {
 
-  gpio_xor_mask(1 << 25); // Toggle LED each frame
+  gpio_xor_mask(1 << LED_BUILTIN); // Toggle LED each frame
 
   // This was for empirically testing window settings in src/arch/ov7670.c.
   // Your code doesn't need this. Just keeping around for future reference.
@@ -123,18 +96,6 @@ void loop() {
                          edge_offset, pclk_delay);
   }
 
-  if (++frame >= KEYFRAME) { // Time to sync up a fresh address window?
-    frame = 0;
-
-    tft.endWrite();   // Close out prior transfer
-    tft.startWrite(); // and start a fresh one (required)
-    // Address window centers QQVGA image on screen. NO CLIPPING IS
-    // PERFORMED, it is assumed here that the camera image is equal
-    // or smaller than the screen.
-    tft.setAddrWindow((tft.width() - cam.width()) / 2,
-                      (tft.height() - cam.height()) / 2,
-                      cam.width(), cam.height());
-  }
 
   // Pause the camera DMA - hold buffer steady to avoid tearing
 //  cam.suspend();
@@ -155,11 +116,16 @@ void loop() {
     cam.Y2RGB565(); // Convert grayscale for TFT preview
   }
 
-  // Camera data arrives in big-endian order...same as the TFT,
-  // so data can just be issued directly, no byte-swap needed.
-  tft.writePixels(cam.getBuffer(), cam.width() * cam.height(), false, true);
-  // To do: add a DMA SPI transfer here -- even if it's blocking,
-  // should still go a ton faster due to endian match.
+  //Write image data to uart in nice format
+  for (int i = 0; i < cam.height(); i++) {
+    for (int j = 0; j < cam.width(); j++) {
+      Serial.print(cam.getBuffer()[i * cam.width() + j], HEX);
+      Serial.print(" ");
+    }
+    Serial.println();
+  }
+
+
 
 //  cam.resume(); // Resume DMA to camera buffer
 }
