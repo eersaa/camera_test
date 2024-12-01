@@ -33,16 +33,39 @@ OV7670_pins pins = {
 
 #endif
 
-#define CAM_SIZE OV7670_SIZE_DIV4 // QQVGA (160x120 pixels)
+#define CAM_SIZE OV7670_SIZE_DIV8     ///< 80 x 60
 #define CAM_MODE OV7670_COLOR_RGB // RGB plz
 
 Adafruit_OV7670 cam(OV7670_ADDR, &pins, &CAM_I2C, &arch);
 // Adafruit_OV7670 cam(0x30, &pins, &CAM_I2C, &arch); // OIV2640 WIP
 
+const char charmap[] = " .:-=+*#%@";
+
+void printAsciiArt() {
+  // Pause the camera DMA - hold buffer steady to avoid tearing
+  cam.suspend();
+
+  // Take only one channel and output it as ASCII art
+  for (uint16_t y = 0; y < cam.height(); y++) {
+    char row[cam.width() + 1]; // +1 for the null terminator
+    for (uint16_t x = 0; x < cam.width(); x++) {
+      uint16_t pixel = cam.getBuffer()[y * cam.width() + x];
+      uint8_t gray = (pixel >> 8) & 0xFF;
+      gray /= 26; // Scale down to 0-9
+      row[x] = charmap[gray];
+    }
+    row[cam.width()] = '\0'; // Null terminator for the string
+    Serial.println(row);
+  }
+
+  // Resume camera DMA - release buffer to start next frame
+  cam.resume(); // Resume DMA to camera buffer
+}
+
 // SETUP - RUNS ONCE ON STARTUP --------------------------------------------
 
 void setup(void) {
-  Serial.begin(9600);
+  Serial.begin(115200);
   //while(!Serial);
   delay(1000);
   Serial.println(F("Hello! Camera Test"));
@@ -56,7 +79,7 @@ void setup(void) {
 
   // Once started, the camera continually fills a frame buffer
   // automagically; no need to request a frame.
-  OV7670_status status = cam.begin(CAM_MODE, CAM_SIZE, 30.0);
+  OV7670_status status = cam.begin(CAM_MODE, CAM_SIZE, 5.0);
   if (status != OV7670_STATUS_OK) {
     Serial.println("Camera begin() fail");
     for(;;);
@@ -81,8 +104,6 @@ void setup(void) {
 // MAIN LOOP - RUNS REPEATEDLY UNTIL RESET OR POWER OFF --------------------
 
 void loop() {
-
-  gpio_xor_mask(1 << LED_BUILTIN); // Toggle LED each frame
 
   // This was for empirically testing window settings in src/arch/ov7670.c.
   // Your code doesn't need this. Just keeping around for future reference.
@@ -112,20 +133,7 @@ void loop() {
   //cam.image_median();
   //cam.image_edges(4);      // 0-31, smaller = more edges
 
-  if(CAM_MODE == OV7670_COLOR_YUV) {
-    cam.Y2RGB565(); // Convert grayscale for TFT preview
-  }
-
-  //Write image data to uart in nice format
-  for (int i = 0; i < cam.height(); i++) {
-    for (int j = 0; j < cam.width(); j++) {
-      Serial.print(cam.getBuffer()[i * cam.width() + j], HEX);
-      Serial.print(" ");
-    }
-    Serial.println();
-  }
-
-
+  printAsciiArt();
 
 //  cam.resume(); // Resume DMA to camera buffer
 }
